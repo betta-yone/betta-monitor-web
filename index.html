@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ベタ水槽モニター</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1d2733; --sub: #66707c;
+    --line: #dde2e8; --ok: #1b8a5a; --warn: #c9302c; --accent: #2a6fdb;
+    --warn-bg: #fdecea; --ok-bg: #e8f5ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161c; --card: #1a222b; --text: #e6ebf0; --sub: #96a1ad;
+      --line: #2c3743; --ok: #4cc38a; --warn: #ff7b72; --accent: #6ea8ff;
+      --warn-bg: #3a1d1d; --ok-bg: #16302b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+    line-height: 1.5;
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 16px; background: var(--card); border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 18px; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .hidden { display: none !important; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; margin-bottom: 14px;
+  }
+  .login { max-width: 360px; margin: 40px auto; }
+  label { display: block; font-size: 13px; color: var(--sub); margin: 12px 0 4px; }
+  input {
+    width: 100%; padding: 10px; font-size: 16px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  button {
+    font-size: 14px; padding: 9px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; margin-top: 16px; font-size: 16px; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
+  .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .banner.ok { background: var(--ok-bg); color: var(--ok); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 14px; }
+  .metric { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .metric .name { font-size: 13px; color: var(--sub); }
+  .metric .value { font-size: 30px; font-weight: 700; margin: 2px 0; }
+  .metric .value small { font-size: 14px; font-weight: 400; color: var(--sub); }
+  .metric .state { font-size: 13px; }
+  .metric.ok .state { color: var(--ok); }
+  .metric.bad { border-color: var(--warn); }
+  .metric.bad .value, .metric.bad .state { color: var(--warn); }
+  .updated { font-size: 13px; color: var(--sub); margin-bottom: 10px; }
+  .ranges { display: flex; gap: 8px; margin-bottom: 12px; }
+  .chart-box { position: relative; height: 200px; }
+  .chart-title { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .error { color: var(--warn); font-size: 14px; margin-top: 10px; }
+  .muted { color: var(--sub); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ベタ水槽モニター</h1>
+  <div id="who" class="muted"></div>
+</header>
+
+<main>
+  <!-- ログイン画面 -->
+  <section id="login" class="card login hidden">
+    <h2 style="margin-top:0; font-size:18px;">ログイン</h2>
+    <label for="email">メールアドレス</label>
+    <input id="email" type="email" autocomplete="username">
+    <label for="password">パスワード</label>
+    <input id="password" type="password" autocomplete="current-password">
+    <button id="loginBtn" class="primary">ログイン</button>
+    <div id="loginError" class="error"></div>
+  </section>
+
+  <!-- 表示画面 -->
+  <section id="dash" class="hidden">
+    <div id="banner" class="banner hidden"></div>
+    <div id="updated" class="updated"></div>
+
+    <div class="grid">
+      <div class="metric" id="m-temp"><div class="name">水温</div><div class="value">-</div><div class="state"></div></div>
+      <div class="metric" id="m-ph"><div class="name">pH</div><div class="value">-</div><div class="state"></div></div>
+      <div class="metric" id="m-turb"><div class="name">濁度</div><div class="value">-</div><div class="state"></div></div>
+      <div class="metric" id="m-water"><div class="name">水位</div><div class="value">-</div><div class="state"></div></div>
+    </div>
+
+    <div class="ranges" id="ranges">
+      <button data-hours="6">6時間</button>
+      <button data-hours="24" class="active">24時間</button>
+      <button data-hours="168">7日</button>
+    </div>
+
+    <div class="card"><p class="chart-title">水温 (℃)</p><div class="chart-box"><canvas id="c-temp"></canvas></div></div>
+    <div class="card"><p class="chart-title">pH</p><div class="chart-box"><canvas id="c-ph"></canvas></div></div>
+    <div class="card"><p class="chart-title">濁度 (NTU)</p><div class="chart-box"><canvas id="c-turb"></canvas></div></div>
+
+    <div style="text-align:center; margin-top: 8px;">
+      <button id="logoutBtn">ログアウト</button>
+    </div>
+    <div id="error" class="error"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script>
+// ------------------------------------------------------------ 設定
+// 公開用キー(publishable key)なので、ここに書いて問題ない。secret key は絶対に書かない。
+const SUPABASE_URL = "https://dzbnchrtmausllqipiku.supabase.co";
+const SUPABASE_KEY = "sb_publishable_5-hTu5PVqTqba66DZNFtEA_cHsYMuWz";
+
+// 異常の基準値(Pi側の .env の値と合わせる)
+const TEMP_MIN = 24, TEMP_MAX = 28;
+const PH_MIN = 6.5, PH_MAX = 7.5;
+const TURBIDITY_MAX = 50;
+const STALE_MIN = 5;          // 最新の測定がこの分数より古いと「止まっている」と警告
+const REFRESH_SEC = 60;       // 自動更新の間隔
+const MAX_POINTS = 300;       // グラフに描く点の最大数
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+let hours = 24;
+let charts = {};
+let timer = null;
+
+// ------------------------------------------------------------ ログイン
+async function showByLogin() {
+  const { data } = await sb.auth.getSession();
+  const session = data.session;
+  $("login").classList.toggle("hidden", !!session);
+  $("dash").classList.toggle("hidden", !session);
+  $("who").textContent = session ? session.user.email : "";
+  clearInterval(timer);
+  if (session) {
+    await load();
+    timer = setInterval(load, REFRESH_SEC * 1000);
+  }
+}
+
+$("loginBtn").addEventListener("click", async () => {
+  $("loginError").textContent = "";
+  const { error } = await sb.auth.signInWithPassword({
+    email: $("email").value.trim(),
+    password: $("password").value,
+  });
+  if (error) {
+    $("loginError").textContent = "ログインできませんでした。メールアドレスとパスワードを確認してください。";
+    return;
+  }
+  $("password").value = "";
+  showByLogin();
+});
+
+$("logoutBtn").addEventListener("click", async () => {
+  await sb.auth.signOut();
+  showByLogin();
+});
+
+// ------------------------------------------------------------ データ取得
+async function fetchLatest() {
+  const { data, error } = await sb
+    .from("sensor_logs")
+    .select("created_at,water_temp,ph,turbidity,water_low")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data[0] || null;
+}
+
+// 1回の取得は最大1000行なので、ページに分けて集める
+async function fetchSince(hoursBack) {
+  const since = new Date(Date.now() - hoursBack * 3600 * 1000).toISOString();
+  const step = 1000;
+  let rows = [];
+  for (let from = 0; from < 20000; from += step) {
+    const { data, error } = await sb
+      .from("sensor_logs")
+      .select("created_at,water_temp,ph,turbidity")
+      .gte("created_at", since)
+      .order("created_at", { ascending: true })
+      .range(from, from + step - 1);
+    if (error) throw error;
+    rows = rows.concat(data);
+    if (data.length < step) break;
+  }
+  return rows;
+}
+
+function avg(group, key) {
+  const v = group.map((r) => r[key]).filter((x) => x !== null && x !== undefined).map(Number);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
+// 点が多すぎるときは、まとめて平均にする
+function downsample(rows, maxPoints) {
+  if (rows.length <= maxPoints) return rows;
+  const size = Math.ceil(rows.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < rows.length; i += size) {
+    const g = rows.slice(i, i + size);
+    out.push({
+      created_at: g[Math.floor(g.length / 2)].created_at,
+      water_temp: avg(g, "water_temp"),
+      ph: avg(g, "ph"),
+      turbidity: avg(g, "turbidity"),
+    });
+  }
+  return out;
+}
+
+// ------------------------------------------------------------ 表示
+function setMetric(id, text, unit, ok, stateText) {
+  const el = $(id);
+  el.classList.remove("ok", "bad");
+  if (ok !== null) el.classList.add(ok ? "ok" : "bad");
+  el.querySelector(".value").innerHTML = "";
+  el.querySelector(".value").append(text);
+  if (unit) {
+    const s = document.createElement("small");
+    s.textContent = " " + unit;
+    el.querySelector(".value").append(s);
+  }
+  el.querySelector(".state").textContent = stateText;
+}
+
+function renderLatest(row) {
+  const banner = $("banner");
+  if (!row) {
+    $("updated").textContent = "まだデータがありません";
+    return;
+  }
+  const t = row.water_temp === null ? null : Number(row.water_temp);
+  const p = row.ph === null ? null : Number(row.ph);
+  const u = row.turbidity === null ? null : Number(row.turbidity);
+
+  if (t === null) setMetric("m-temp", "-", "℃", false, "読み取りエラー");
+  else {
+    const ok = t >= TEMP_MIN && t <= TEMP_MAX;
+    setMetric("m-temp", t.toFixed(1), "℃", ok, ok ? "正常" : t < TEMP_MIN ? "低すぎます" : "高すぎます");
+  }
+  if (p === null) setMetric("m-ph", "-", "", false, "読み取りエラー");
+  else {
+    const ok = p >= PH_MIN && p <= PH_MAX;
+    setMetric("m-ph", p.toFixed(2), "", ok, ok ? "正常" : "基準外です");
+  }
+  if (u === null) setMetric("m-turb", "-", "NTU", false, "読み取りエラー");
+  else {
+    const ok = u <= TURBIDITY_MAX;
+    setMetric("m-turb", u.toFixed(1), "NTU", ok, ok ? "正常" : "濁っています");
+  }
+  setMetric("m-water", row.water_low ? "低下" : "正常", "", !row.water_low, row.water_low ? "水を足してください" : "");
+
+  const ageMin = (Date.now() - new Date(row.created_at).getTime()) / 60000;
+  const when = new Date(row.created_at).toLocaleString("ja-JP");
+  $("updated").textContent = "最終測定: " + when + "(" + Math.floor(ageMin) + "分前)";
+  if (ageMin > STALE_MIN) {
+    banner.className = "banner warn";
+    banner.textContent = "測定が" + Math.floor(ageMin) + "分間届いていません。Raspberry Piが止まっている可能性があります。";
+  } else {
+    banner.className = "banner hidden";
+  }
+}
+
+function makeChart(canvasId, color, lo, hi) {
+  const lineStyle = { pointRadius: 0, borderWidth: 1, borderDash: [5, 4], borderColor: "#c9302c", fill: false };
+  const datasets = [{ data: [], borderColor: color, borderWidth: 2, pointRadius: 0, tension: 0.2, fill: false }];
+  if (lo !== null) datasets.push({ ...lineStyle, data: [] });
+  if (hi !== null) datasets.push({ ...lineStyle, data: [] });
+  return new Chart($(canvasId), {
+    type: "line",
+    data: { labels: [], datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } },
+      scales: { x: { ticks: { maxTicksLimit: 6, maxRotation: 0 } } },
+    },
+  });
+}
+
+function fillChart(chart, labels, values, lo, hi) {
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = values;
+  let i = 1;
+  if (lo !== null) chart.data.datasets[i++].data = labels.map(() => lo);
+  if (hi !== null) chart.data.datasets[i++].data = labels.map(() => hi);
+  chart.update();
+}
+
+function renderCharts(rows) {
+  const pts = downsample(rows, MAX_POINTS);
+  const fmt = hours > 24
+    ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { hour: "2-digit", minute: "2-digit" };
+  const labels = pts.map((r) => new Date(r.created_at).toLocaleString("ja-JP", fmt));
+  const num = (key) => pts.map((r) => (r[key] === null ? null : Number(Number(r[key]).toFixed(2))));
+
+  if (!charts.temp) {
+    charts.temp = makeChart("c-temp", "#2a6fdb", TEMP_MIN, TEMP_MAX);
+    charts.ph = makeChart("c-ph", "#1b8a5a", PH_MIN, PH_MAX);
+    charts.turb = makeChart("c-turb", "#b7791f", null, TURBIDITY_MAX);
+  }
+  fillChart(charts.temp, labels, num("water_temp"), TEMP_MIN, TEMP_MAX);
+  fillChart(charts.ph, labels, num("ph"), PH_MIN, PH_MAX);
+  fillChart(charts.turb, labels, num("turbidity"), null, TURBIDITY_MAX);
+}
+
+async function load() {
+  $("error").textContent = "";
+  try {
+    const [latest, rows] = await Promise.all([fetchLatest(), fetchSince(hours)]);
+    renderLatest(latest);
+    renderCharts(rows);
+  } catch (e) {
+    $("error").textContent = "データを取得できませんでした: " + (e.message || e);
+  }
+}
+
+$("ranges").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-hours]");
+  if (!btn) return;
+  hours = Number(btn.dataset.hours);
+  document.querySelectorAll("#ranges button").forEach((b) => b.classList.toggle("active", b === btn));
+  load();
+});
+
+// 画面の配色(ダークモード)に合わせてグラフの文字色を決める
+Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue("--sub").trim();
+Chart.defaults.borderColor = getComputedStyle(document.documentElement).getPropertyValue("--line").trim();
+
+sb.auth.onAuthStateChange(() => {});
+showByLogin();
+</script>
+</body>
+</html>
